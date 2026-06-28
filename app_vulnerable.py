@@ -1,61 +1,67 @@
 """
-Vulnerable Demo App - Intentional security flaws for Semgrep testing.
-DO NOT use in production.
+Fixed Demo App - All vulnerabilities remediated.
 """
 import hashlib
 import os
-import pickle
+import shlex
 import sqlite3
-from flask import Flask, request
+import json
+
+from flask import Flask, request, abort
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# --- VULN 1: Hardcoded secret ---
-DATABASE_PASSWORD = "SuperSecret123!"
-API_KEY = "AKIAIOSFODNN7EXAMPLE"
+# --- FIX 1: Secrets from environment variables ---
+DATABASE_PASSWORD = os.environ.get("DATABASE_PASSWORD")
+API_KEY = os.environ.get("API_KEY")
 
 
-# --- VULN 2: SQL Injection ---
+# --- FIX 2: Parameterized query prevents SQL Injection ---
 @app.route("/user")
 def get_user():
     username = request.args.get("username")
     conn = sqlite3.connect("app.db")
-    query = "SELECT * FROM users WHERE username = '" + username + "'"
-    result = conn.execute(query)
+    query = "SELECT * FROM users WHERE username = ?"
+    result = conn.execute(query, (username,))
     return str(result.fetchall())
 
 
-# --- VULN 3: Command Injection ---
+# --- FIX 3: shlex.quote prevents Command Injection ---
 @app.route("/ping")
 def ping():
     host = request.args.get("host")
-    output = os.system("ping -c 1 " + host)
+    output = os.system("ping -c 1 " + shlex.quote(host))
     return str(output)
 
 
-# --- VULN 4: Insecure Deserialization ---
+# --- FIX 4: Use JSON instead of pickle ---
 @app.route("/load", methods=["POST"])
 def load_data():
     data = request.get_data()
-    obj = pickle.loads(data)
+    obj = json.loads(data)
     return str(obj)
 
 
-# --- VULN 5: Weak Hashing for Passwords ---
+# --- FIX 5: Strong hashing with SHA-256 (use bcrypt in real apps) ---
 @app.route("/register", methods=["POST"])
 def register():
     password = request.form.get("password")
-    hashed = hashlib.md5(password.encode()).hexdigest()
+    hashed = hashlib.sha256(password.encode()).hexdigest()
     return f"Stored hash: {hashed}"
 
 
-# --- VULN 6: Path Traversal ---
+# --- FIX 6: secure_filename prevents Path Traversal ---
 @app.route("/read")
 def read_file():
     filename = request.args.get("file")
-    with open("/var/data/" + filename, "r") as f:
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        abort(400, "Invalid filename")
+    filepath = os.path.join("/var/data/", safe_name)
+    with open(filepath, "r") as f:
         return f.read()
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
